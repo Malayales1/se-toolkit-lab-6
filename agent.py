@@ -431,59 +431,77 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], config: dict = None)
 def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]:
     """
     Call LLM API with tool support and implement agentic loop.
-    
+    Uses requests library for Groq API compatibility.
+
     Args:
         question: User question string
         config: Configuration dictionary with api_key, api_base, model
-        
+
     Returns:
         dict with 'answer', 'source', and 'tool_calls' fields
     """
-    client = OpenAI(
-        api_key=config['api_key'],
-        base_url=config['api_base']
-    )
-    
     # Initialize message history with system prompt and user question
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": question}
     ]
-    
+
     # Track all tool calls for output
     all_tool_calls = []
     tool_call_count = 0
-    
+
     # Agentic loop
     while tool_call_count < MAX_TOOL_CALLS:
-        # Step 1: Send question + tool definitions to LLM
-        response = client.chat.completions.create(
-            model=config['model'],
-            messages=messages,
-            tools=TOOLS,
-            temperature=0.7,
-            max_tokens=1000
-        )
+        # Step 1: Send question + tool definitions to LLM using requests
+        url = f"{config['api_base']}/chat/completions"
+        headers = {
+            'Authorization': f"Bearer {config['api_key']}",
+            'Content-Type': 'application/json'
+        }
+        data = {
+            'model': config['model'],
+            'messages': messages,
+            'temperature': 0.7,
+            'max_tokens': 1000
+        }
+        if TOOLS:
+            data['tools'] = TOOLS
         
-        assistant_message = response.choices[0].message
+        response = requests.post(url, headers=headers, json=data, timeout=60)
+        response.raise_for_status()
+        response_data = response.json()
+        
+        assistant_message_data = response_data['choices'][0]['message']
+        
+        # Parse tool calls if present
+        tool_calls = []
+        if 'tool_calls' in assistant_message_data and assistant_message_data['tool_calls']:
+            for tc in assistant_message_data['tool_calls']:
+                tool_calls.append(type('ToolCall', (), {
+                    'id': tc['id'],
+                    'function': type('Function', (), {
+                        'name': tc['function']['name'],
+                        'arguments': tc['function']['arguments']
+                    })()
+                })())
         
         # Step 2: Check if LLM responded with tool_calls
-        if assistant_message.tool_calls:
+        if tool_calls:
             # Add assistant message to history
             messages.append({
                 "role": "assistant",
-                "content": assistant_message.content,
-                "tool_calls": assistant_message.tool_calls
+                "content": assistant_message_data.get('content'),
+                "tool_calls": assistant_message_data['tool_calls']
             })
-            
+
             # Step 3: Execute each tool call
-            for tool_call in assistant_message.tool_calls:
+            for tool_call in tool_calls:
                 tool_name = tool_call.function.name
                 tool_args = json.loads(tool_call.function.arguments)
 
                 # Execute the tool (pass config for query_api)
                 result = execute_tool(tool_name, tool_args, config)
-                
+
                 # Record the tool call
                 tool_call_record = {
                     "tool": tool_name,
@@ -491,16 +509,16 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
                     "result": result
                 }
                 all_tool_calls.append(tool_call_record)
-                
+
                 # Add tool result to message history
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(result)
                 })
-                
+
                 tool_call_count += 1
-            
+
             # Continue loop - go back to step 1
             continue
         
