@@ -84,9 +84,9 @@
 ## API Configuration
 
 ```
-LLM_API_BASE=https://api.qwenlm.ai/v1
+LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_MODEL=qwen3-coder-plus
-LLM_API_KEY=<obtained from Qwen Code setup>
+LLM_API_KEY=<obtained from Qwen Code setup / Dashscope>
 ```
 
 ## Expected Output Format
