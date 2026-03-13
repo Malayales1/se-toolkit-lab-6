@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI Agent for calling LLM (Qwen Code API) with documentation discovery tools.
+CLI Agent for calling LLM (Qwen Code API) with documentation discovery and API query tools.
 
 Usage:
     uv run agent.py "What is REST?"
@@ -14,6 +14,7 @@ All debug/progress output goes to stderr.
 import os
 import sys
 import json
+import requests
 from pathlib import Path
 from typing import Any
 from dotenv import load_dotenv
@@ -21,12 +22,15 @@ from openai import OpenAI
 
 
 def load_config():
-    """Load configuration from .env.agent.secret file."""
+    """Load configuration from .env.agent.secret and .env.docker.secret files."""
     load_dotenv('.env.agent.secret')
+    load_dotenv('.env.docker.secret')
     return {
         'api_key': os.getenv('LLM_API_KEY'),
         'api_base': os.getenv('LLM_API_BASE'),
-        'model': os.getenv('LLM_MODEL')
+        'model': os.getenv('LLM_MODEL'),
+        'api_base_url': os.getenv('AGENT_API_BASE_URL', 'http://localhost:42002'),
+        'lms_api_key': os.getenv('LMS_API_KEY')
     }
 
 
@@ -199,6 +203,110 @@ def list_files(path: str) -> dict[str, Any]:
         }
 
 
+def query_api(method: str, path: str, body: str = None, config: dict = None) -> dict[str, Any]:
+    """
+    Call the deployed backend API to get system data.
+
+    Args:
+        method: HTTP method (GET, POST, PUT, DELETE)
+        path: API endpoint path (e.g., '/items/', '/analytics/scores?lab=lab-04')
+        body: Optional JSON request body for POST/PUT requests
+        config: Configuration dictionary with api_base_url and lms_api_key
+
+    Returns:
+        dict with 'success' boolean and either 'data' or 'error' message
+    """
+    if config is None:
+        config = load_config()
+
+    # Validate method
+    valid_methods = ["GET", "POST", "PUT", "DELETE"]
+    if method not in valid_methods:
+        return {
+            "success": False,
+            "error": f"Invalid method: {method}. Must be one of: {', '.join(valid_methods)}"
+        }
+
+    # Ensure path starts with /
+    if not path.startswith("/"):
+        path = "/" + path
+
+    # Build full URL
+    base_url = config['api_base_url'].rstrip('/')
+    url = f"{base_url}{path}"
+
+    # Build headers
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    # Add authentication header if API key is available
+    if config.get('lms_api_key'):
+        headers["X-API-Key"] = config['lms_api_key']
+
+    # Prepare request body
+    request_body = None
+    if body and method in ["POST", "PUT"]:
+        try:
+            # Validate JSON body
+            request_body = json.loads(body)
+        except json.JSONDecodeError as e:
+            return {
+                "success": False,
+                "error": f"Invalid JSON body: {e}"
+            }
+
+    try:
+        # Make the request
+        response = requests.request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=request_body,
+            timeout=30
+        )
+
+        # Try to parse JSON response
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            data = response.text
+
+        if response.status_code >= 200 and response.status_code < 300:
+            return {
+                "success": True,
+                "status_code": response.status_code,
+                "data": data
+            }
+        else:
+            return {
+                "success": False,
+                "status_code": response.status_code,
+                "error": data if isinstance(data, str) else json.dumps(data)
+            }
+
+    except requests.exceptions.ConnectionError as e:
+        return {
+            "success": False,
+            "error": f"Connection error: Could not connect to {url}. Ensure the backend is running."
+        }
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "error": f"Timeout: Request to {url} timed out after 30 seconds"
+        }
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "error": f"Request error: {e}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Unexpected error: {e}"
+        }
+
+
 # Tool definitions in OpenAI function calling format
 TOOLS = [
     {
@@ -234,40 +342,71 @@ TOOLS = [
                 "required": ["path"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_api",
+            "description": "Call the deployed backend API to get system data",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "enum": ["GET", "POST", "PUT", "DELETE"],
+                        "description": "HTTP method"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "API endpoint path (e.g., '/items/', '/analytics/scores?lab=lab-04')"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Optional JSON request body for POST/PUT requests"
+                    }
+                },
+                "required": ["method", "path"]
+            }
+        }
     }
 ]
 
-# System prompt for documentation discovery
-SYSTEM_PROMPT = """You are a Documentation Agent that helps users find information in the project wiki.
+# System prompt for documentation discovery and API queries
+SYSTEM_PROMPT = """You are a System Agent that helps users find information from both the project wiki and the deployed backend API.
 
-You have access to two tools:
+You have access to three tools:
 - read_file: Read the contents of a file from the project repository
 - list_files: List files and directories at a given path
+- query_api: Call the deployed backend API to get system data
 
 When answering questions:
-1. Use tools to explore the wiki and find relevant documentation
-2. Always cite your sources using the format: wiki/<filename>.md#<section>
-3. If you're not sure where information is, use list_files to explore directories
-4. Read files using read_file to get detailed information
-5. Provide clear, accurate answers based on the documentation you find
+1. For questions about system data, analytics, scores, or items - use query_api
+2. For questions about documentation - use read_file and list_files
+3. Always cite your sources:
+   - For API responses: mention the API endpoint used
+   - For wiki files: use format wiki/<filename>.md#<section>
+4. Use GET method for retrieving data, POST for creating, PUT for updating, DELETE for removing
+5. Provide clear, accurate answers based on the data you retrieve
 
 Important:
-- Only access files within the project repository
-- Paths should be relative to the project root (e.g., 'wiki/git-workflow.md')
-- Never attempt to access files outside the repository
+- API base URL is configured in your environment
+- Paths should include leading slash (e.g., '/items/', '/analytics/scores')
+- For query parameters, include them in the path (e.g., '/analytics/scores?lab=lab-04')
+- Request body should be a valid JSON string for POST/PUT requests
 """
 
 MAX_TOOL_CALLS = 10
 
 
-def execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def execute_tool(tool_name: str, arguments: dict[str, Any], config: dict = None) -> dict[str, Any]:
     """
     Execute a tool by name with the given arguments.
-    
+
     Args:
         tool_name: Name of the tool to execute
         arguments: Arguments to pass to the tool
-        
+        config: Configuration dictionary (required for query_api)
+
     Returns:
         Result from the tool execution
     """
@@ -277,6 +416,11 @@ def execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     elif tool_name == "list_files":
         path = arguments.get("path", "")
         return list_files(path)
+    elif tool_name == "query_api":
+        method = arguments.get("method", "GET")
+        path = arguments.get("path", "")
+        body = arguments.get("body")
+        return query_api(method, path, body, config)
     else:
         return {
             "success": False,
@@ -336,9 +480,9 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
             for tool_call in assistant_message.tool_calls:
                 tool_name = tool_call.function.name
                 tool_args = json.loads(tool_call.function.arguments)
-                
-                # Execute the tool
-                result = execute_tool(tool_name, tool_args)
+
+                # Execute the tool (pass config for query_api)
+                result = execute_tool(tool_name, tool_args, config)
                 
                 # Record the tool call
                 tool_call_record = {
