@@ -176,13 +176,179 @@ class TestAgentUnit:
         from unittest.mock import patch
         import io
         import sys
-        
+
         with patch('sys.argv', ['agent.py', 'Test question?']):
             with patch('agent.load_config') as mock_load:
                 mock_load.return_value = {'api_key': None, 'api_base': None, 'model': None}
-                
+
                 with patch('sys.stderr', io.StringIO()) as mock_stderr:
                     try:
                         main()
                     except SystemExit as e:
                         assert e.code == 1
+
+
+class TestDocumentationAgent:
+    """Regression tests for Documentation Agent with file tools."""
+
+    def test_merge_conflicts_question_uses_read_file(self):
+        """Test that a question about merge conflicts triggers read_file tool."""
+        from agent import call_llm_with_tools
+        from unittest.mock import MagicMock, patch
+
+        # Mock LLM response that calls read_file tool
+        mock_tool_call = MagicMock()
+        mock_tool_call.function.name = "read_file"
+        mock_tool_call.function.arguments = '{"path": "wiki/git-workflow.md"}'
+        mock_tool_call.id = "call_1"
+
+        # First response: tool call
+        mock_response_with_tool = MagicMock()
+        mock_response_with_tool.choices = [MagicMock()]
+        mock_response_with_tool.choices[0].message.tool_calls = [mock_tool_call]
+        mock_response_with_tool.choices[0].message.content = None
+
+        # Second response: final answer
+        mock_response_final = MagicMock()
+        mock_response_final.choices = [MagicMock()]
+        mock_response_final.choices[0].message.tool_calls = []
+        mock_response_final.choices[0].message.content = (
+            "To resolve merge conflicts, see wiki/git-workflow.md#resolving-merge-conflicts"
+        )
+
+        config = {
+            'api_key': 'test-key',
+            'api_base': 'https://test.api/v1',
+            'model': 'test-model'
+        }
+
+        with patch('agent.OpenAI') as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            # First call returns tool call, second returns final answer
+            mock_client.chat.completions.create.side_effect = [
+                mock_response_with_tool,
+                mock_response_final
+            ]
+
+            result = call_llm_with_tools("How do I resolve merge conflicts?", config)
+
+            # Verify read_file was called
+            assert len(result["tool_calls"]) >= 1
+            assert any(tc["tool"] == "read_file" for tc in result["tool_calls"])
+            # Verify source contains expected wiki file
+            assert "wiki/git-workflow.md" in result["source"]
+
+    def test_wiki_files_question_uses_list_files(self):
+        """Test that a question about wiki files triggers list_files tool."""
+        from agent import call_llm_with_tools
+        from unittest.mock import MagicMock, patch
+
+        # Mock LLM response that calls list_files tool
+        mock_tool_call = MagicMock()
+        mock_tool_call.function.name = "list_files"
+        mock_tool_call.function.arguments = '{"path": "wiki"}'
+        mock_tool_call.id = "call_1"
+
+        # First response: tool call
+        mock_response_with_tool = MagicMock()
+        mock_response_with_tool.choices = [MagicMock()]
+        mock_response_with_tool.choices[0].message.tool_calls = [mock_tool_call]
+        mock_response_with_tool.choices[0].message.content = None
+
+        # Second response: final answer
+        mock_response_final = MagicMock()
+        mock_response_final.choices = [MagicMock()]
+        mock_response_final.choices[0].message.tool_calls = []
+        mock_response_final.choices[0].message.content = (
+            "The wiki directory contains documentation files about Git, Docker, API, and more."
+        )
+
+        config = {
+            'api_key': 'test-key',
+            'api_base': 'https://test.api/v1',
+            'model': 'test-model'
+        }
+
+        with patch('agent.OpenAI') as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+            # First call returns tool call, second returns final answer
+            mock_client.chat.completions.create.side_effect = [
+                mock_response_with_tool,
+                mock_response_final
+            ]
+
+            result = call_llm_with_tools("What files are in the wiki?", config)
+
+            # Verify list_files was called
+            assert len(result["tool_calls"]) >= 1
+            assert any(tc["tool"] == "list_files" for tc in result["tool_calls"])
+
+    def test_read_file_security_path_traversal(self):
+        """Test that read_file rejects directory traversal attempts."""
+        from agent import read_file
+
+        # Test various traversal patterns
+        malicious_paths = [
+            "../secret.txt",
+            "wiki/../../../etc/passwd",
+            "wiki/../../.env",
+            "..\\secret.txt",
+        ]
+
+        for path in malicious_paths:
+            result = read_file(path)
+            assert result["success"] is False
+            assert "directory traversal not allowed" in result["error"]
+
+    def test_list_files_security_path_traversal(self):
+        """Test that list_files rejects directory traversal attempts."""
+        from agent import list_files
+
+        # Test various traversal patterns
+        malicious_paths = [
+            "../",
+            "wiki/../../",
+            "..",
+        ]
+
+        for path in malicious_paths:
+            result = list_files(path)
+            assert result["success"] is False
+            assert "directory traversal not allowed" in result["error"]
+
+    def test_read_file_valid_path(self):
+        """Test that read_file works with valid paths."""
+        from agent import read_file
+        from unittest.mock import patch
+        from pathlib import Path
+
+        # Mock file existence and content
+        with patch('pathlib.Path.exists', return_value=True):
+            with patch('pathlib.Path.is_file', return_value=True):
+                with patch('pathlib.Path.read_text', return_value="Test content"):
+                    result = read_file("wiki/test.md")
+                    assert result["success"] is True
+                    assert result["content"] == "Test content"
+
+    def test_list_files_valid_path(self):
+        """Test that list_files works with valid paths using real wiki directory."""
+        from agent import list_files
+
+        # Use the actual wiki directory in the project
+        result = list_files("wiki")
+        
+        assert result["success"] is True
+        assert "files" in result
+        assert len(result["files"]) > 0
+        
+        # Verify structure of returned files
+        for file_info in result["files"]:
+            assert "name" in file_info
+            assert "type" in file_info
+            assert file_info["type"] in ["file", "dir"]
+        
+        # Check that expected files exist
+        file_names = [f["name"] for f in result["files"]]
+        assert "git.md" in file_names or "git-workflow.md" in file_names
