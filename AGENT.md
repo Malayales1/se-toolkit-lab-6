@@ -1,13 +1,13 @@
-# Documentation Agent for Lab 6 - Task 2
+# System Agent for Lab 6 - Task 3
 
 ## Overview
 
-This agent extends the CLI agent from Task 1 with **tool-calling capabilities** to enable documentation discovery. The agent can now read files and list directories within the project wiki to answer questions about the documentation.
+This agent extends the Documentation Agent from Task 2 with a **`query_api` tool** that enables interaction with the deployed backend API. The agent can now query the Learning Management Service (LMS) API to retrieve system data, analytics scores, and other information.
 
 ## LLM Provider and Model
 
 - **Provider:** OpenRouter API
-- **Model:** `qwen/qwen-2.5-coder-32b-instruct:free` (free, no credits required)
+- **Model:** `nvidia/nemotron-3-super-120b-a12b:free` (free, no credits required)
 - **API Base:** `https://openrouter.ai/api/v1`
 
 **Alternative free models:**
@@ -19,7 +19,7 @@ The agent uses the OpenAI-compatible chat completions API with function calling 
 
 ## Available Tools
 
-The agent has access to two tools for exploring the project documentation:
+The agent has access to three tools:
 
 ### 1. `read_file`
 
@@ -85,9 +85,48 @@ Or on error:
 list_files({"path": "wiki"})
 ```
 
+### 3. `query_api`
+
+Calls the deployed backend API to get system data.
+
+**Parameters:**
+| Name | Type | Description |
+|------|------|-------------|
+| `method` | string | HTTP method: GET, POST, PUT, or DELETE |
+| `path` | string | API endpoint path (e.g., `/items/`, `/analytics/scores?lab=lab-04`) |
+| `body` | string (optional) | JSON request body for POST/PUT requests |
+
+**Returns:**
+```json
+{
+  "success": true,
+  "status_code": 200,
+  "data": {...}
+}
+```
+
+Or on error:
+```json
+{
+  "success": false,
+  "status_code": 404,
+  "error": "Error message"
+}
+```
+
+**Example usage:**
+```python
+query_api({
+    "method": "GET",
+    "path": "/items/"
+})
+```
+
+**Authentication:** All API requests include the `LMS_API_KEY` from `.env.docker.secret` in the `Authorization: Bearer` header.
+
 ### Security: Path Validation
 
-Both tools implement **directory traversal prevention** to ensure security:
+The `read_file` and `list_files` tools implement **directory traversal prevention** to ensure security:
 
 - ❌ Rejects paths containing `..` (e.g., `../secret.txt`)
 - ❌ Rejects absolute paths (e.g., `/etc/passwd`)
