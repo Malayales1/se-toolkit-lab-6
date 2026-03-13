@@ -242,7 +242,7 @@ def query_api(method: str, path: str, body: str = None, config: dict = None) -> 
 
     # Add authentication header if API key is available
     if config.get('lms_api_key'):
-        headers["X-API-Key"] = config['lms_api_key']
+        headers["Authorization"] = f"Bearer {config['lms_api_key']}"
 
     # Prepare request body
     request_body = None
