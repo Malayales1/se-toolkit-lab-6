@@ -100,35 +100,37 @@ The agent reads all configuration from environment variables:
 
 ## Benchmark Results
 
-### Initial Score
+### Latest Score
 
 ```
-3/10 passed (30%)
+Local: 2/5 passed (40%)
+Hidden: 3/5 passed (60%)
 ```
 
-### First Failures
+### Passed Questions:
+- ✅ [0] Wiki: branch protection steps
+- ✅ [2] Backend framework (FastAPI)
+- ✅ [10] Wiki: Docker cleanup
+- ✅ [12] Dockerfile: multi-stage build
+- ✅ [14] Learners count via API
 
-1. **Timeout (60s)** - Agent took too long due to rate limiting
-   - **Fix:** Increased timeout to 300s in run_eval.py
-   - **Fix:** Implemented exponential backoff (8s, 16s, 32s, 64s delays)
+### Failed Questions:
+- ❌ [4] Items count - agent not using query_api correctly
+- ❌ [6] Completion-rate error diagnosis
+- ❌ [8] Docker infrastructure path tracing
+- ❌ [16] Analytics.py bug detection (division, None)
 
-2. **Wrong tool selection** - LLM used `list_files` instead of `read_file`
-   - **Fix:** Made system prompt more explicit about direct file paths
-   - **Fix:** Added examples in prompt (e.g., "wiki/git-workflow.md")
+### Fixes Applied:
 
-3. **Missing authentication** - `query_api` didn't include LMS_API_KEY
-   - **Fix:** Pass config to `query_api` function
-   - **Fix:** Use Bearer token in Authorization header
+1. **Improved System Prompt** - Added explicit sections:
+   - DATA questions: ALWAYS use query_api with GET
+   - CODE/DEBUG questions: read_file for source code
+   - DOCUMENTATION questions: read_file for wiki
+   - Examples of files: backend/analytics.py, backend/main.py
 
-4. **Null content handling** - Agent crashed with `AttributeError` when LLM returned `content: null`
-   - **Fix:** Changed `msg.get("content", "")` to `(msg.get("content") or "")`
+2. **Increased MAX_TOOL_CALLS** - From 10 to 15 for multi-step debugging
 
-### Iteration Strategy
-
-1. **Reduce tool calls:** Lowered MAX_TOOL_CALLS from 20 to 10
-2. **Optimize prompt:** Made system prompt more concise and explicit
-3. **Better error handling:** Added retry logic with exponential backoff
-4. **Cache API responses:** Implemented `_api_cache` for GET requests
+3. **Error Investigation Guidance** - Added instructions to read API error messages and investigate source code
 
 ## Final Architecture
 
