@@ -6,14 +6,9 @@ This agent extends the Documentation Agent from Task 2 with a **`query_api` tool
 
 ## LLM Provider and Model
 
-- **Provider:** OpenRouter API
-- **Model:** `nvidia/nemotron-3-super-120b-a12b:free` (free, no credits required)
-- **API Base:** `https://openrouter.ai/api/v1`
-
-**Alternative free models:**
-- `meta-llama/llama-3.3-70b-instruct:free` - Best overall
-- `mistralai/devstral-2512:free` - Best for coding
-- `google/gemma-3-12b-it:free` - Good for general tasks
+- **Provider:** OpenRouter API or Dashscope (Alibaba Cloud)
+- **API Base:** Configurable via environment variables
+- **Model:** Configurable via `LLM_MODEL` environment variable
 
 The agent uses the OpenAI-compatible chat completions API with function calling support.
 
@@ -38,19 +33,6 @@ Reads the contents of a file from the project repository.
 }
 ```
 
-Or on error:
-```json
-{
-  "success": false,
-  "error": "Error message"
-}
-```
-
-**Example usage:**
-```python
-read_file({"path": "wiki/git-workflow.md"})
-```
-
 ### 2. `list_files`
 
 Lists files and directories at a given path within the project.
@@ -66,28 +48,14 @@ Lists files and directories at a given path within the project.
   "success": true,
   "files": [
     {"name": "git.md", "type": "file"},
-    {"name": "git-workflow.md", "type": "file"},
-    {"name": "images", "type": "dir"}
+    {"name": "git-workflow.md", "type": "file"}
   ]
 }
 ```
 
-Or on error:
-```json
-{
-  "success": false,
-  "error": "Error message"
-}
-```
+### 3. `query_api` (NEW in Task 3)
 
-**Example usage:**
-```python
-list_files({"path": "wiki"})
-```
-
-### 3. `query_api`
-
-Calls the deployed backend API to get system data.
+Calls the deployed backend API to get system data. This tool enables the agent to answer data-dependent questions like "How many items are in the database?" or "What is the completion rate for lab-99?"
 
 **Parameters:**
 | Name | Type | Description |
@@ -95,6 +63,7 @@ Calls the deployed backend API to get system data.
 | `method` | string | HTTP method: GET, POST, PUT, or DELETE |
 | `path` | string | API endpoint path (e.g., `/items/`, `/analytics/scores?lab=lab-04`) |
 | `body` | string (optional) | JSON request body for POST/PUT requests |
+| `authenticate` | boolean (optional) | Whether to include authentication header (default: true) |
 
 **Returns:**
 ```json
@@ -102,15 +71,6 @@ Calls the deployed backend API to get system data.
   "success": true,
   "status_code": 200,
   "data": {...}
-}
-```
-
-Or on error:
-```json
-{
-  "success": false,
-  "status_code": 404,
-  "error": "Error message"
 }
 ```
 
@@ -122,11 +82,11 @@ query_api({
 })
 ```
 
-**Authentication:** All API requests include the `LMS_API_KEY` from `.env.docker.secret` in the `Authorization: Bearer` header.
+**Authentication:** All API requests include the `LMS_API_KEY` from `.env.docker.secret` in the `Authorization: Bearer` header. This key is automatically loaded by the `load_config()` function and passed to the `query_api` tool.
 
 ### Security: Path Validation
 
-The `read_file` and `list_files` tools implement **directory traversal prevention** to ensure security:
+The `read_file` and `list_files` tools implement **directory traversal prevention**:
 
 - ❌ Rejects paths containing `..` (e.g., `../secret.txt`)
 - ❌ Rejects absolute paths (e.g., `/etc/passwd`)
@@ -172,7 +132,7 @@ The agent implements an **agentic loop** that allows iterative tool usage:
 3. **Execute Tools** (if `tool_calls` present)
    - For each tool call:
      - Extract tool name and arguments
-     - Execute the corresponding function (`read_file` or `list_files`)
+     - Execute the corresponding function (`read_file`, `list_files`, or `query_api`)
      - Capture result or error
    - Append tool results as `tool` role messages to conversation history
    - Increment tool call counter
@@ -195,64 +155,80 @@ The agent implements an **agentic loop** that allows iterative tool usage:
 
 ## System Prompt Strategy
 
-The system prompt guides the LLM to effectively use tools for documentation discovery:
+The system prompt guides the LLM to effectively use tools:
 
 ```
-You are a Documentation Agent that helps users find information in the project wiki.
+You are a System Agent that helps users find information from both the project wiki and the deployed backend API.
 
-You have access to two tools:
-- read_file: Read the contents of a file from the project repository
-- list_files: List files and directories at a given path
+You have access to three tools:
+- read_file: Read the contents of a file from the project repository (e.g., wiki/git-workflow.md)
+- list_files: List files and directories at a given path (e.g., wiki)
+- query_api: Call the deployed backend API to get system data (items, analytics, scores, learners, interactions)
 
 When answering questions:
-1. Use tools to explore the wiki and find relevant documentation
-2. Always cite your sources using the format: wiki/<filename>.md#<section>
-3. If you're not sure where information is, use list_files to explore directories
-4. Read files using read_file to get detailed information
-5. Provide clear, accurate answers based on the documentation you find
-
-Important:
-- Only access files within the project repository
-- Paths should be relative to the project root (e.g., 'wiki/git-workflow.md')
-- Never attempt to access files outside the repository
+1. For wiki/documentation questions (git, docker, ssh, vm, etc.) - use read_file with the expected path
+2. For system data/analytics/items/scores/learners - use query_api with GET method
+3. For "how many" questions about data - use query_api and count the results
+4. Provide clear, direct answers based on retrieved data
+5. Cite sources: wiki/<file>.md#section for docs, API endpoint for data
 ```
 
-### Key Strategies
+### Tool Selection Strategy
 
-1. **Tool-first approach:** LLM is instructed to use tools before answering
-2. **Source citation:** Answers must include wiki file references
-3. **Exploratory behavior:** Use `list_files` when uncertain about file locations
-4. **Security boundaries:** Clear instructions to stay within project root
+| Question Type | Tool | Example |
+|--------------|------|---------|
+| Documentation (git, docker, ssh) | `read_file` | "How do I resolve merge conflicts?" |
+| Explore wiki structure | `list_files` | "What files are in the wiki?" |
+| System data, items | `query_api` (GET) | "How many items are in the database?" |
+| Analytics scores | `query_api` (GET) | "Get scores for lab-04" |
+| API debugging | `query_api` (any) | "Test the /items/ endpoint" |
+
+## Environment Variables
+
+The agent reads all configuration from environment variables:
+
+| Variable | Purpose | Source |
+|----------|---------|--------|
+| `LLM_API_KEY` | LLM provider API key | `.env.agent.secret` |
+| `LLM_API_BASE` | LLM API endpoint URL | `.env.agent.secret` |
+| `LLM_MODEL` | Model name | `.env.agent.secret` |
+| `LMS_API_KEY` | Backend API key for `query_api` auth | `.env.docker.secret` |
+| `AGENT_API_BASE_URL` | Base URL for `query_api` (default: `http://localhost:42002`) | Optional |
+
+**Important:** The autochecker runs your agent with different LLM credentials and a different backend URL. Never hardcode these values.
 
 ## Setup Instructions
 
-### 1. Create Environment File
+### 1. Create Environment Files
 
 ```bash
 cp .env.agent.example .env.agent.secret
+cp .env.docker.example .env.docker.secret
 ```
 
-### 2. Configure Credentials
+### 2. Configure LLM Credentials
 
-Edit `.env.agent.secret` with your OpenRouter API credentials:
+Edit `.env.agent.secret`:
 
 ```env
 LLM_API_KEY=sk-or-v1-...  # Get from https://openrouter.ai/keys
 LLM_API_BASE=https://openrouter.ai/api/v1
-LLM_MODEL=alibaba/qwen3-coder-plus
+LLM_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+AGENT_API_BASE_URL=http://localhost:42002
 ```
 
-**To get your API key:**
-1. Go to [OpenRouter](https://openrouter.ai/)
-2. Sign in with your GitHub/Google account
-3. Navigate to **Keys** section
-4. Create a new API key
-5. Copy the key (starts with `sk-or-v1-`)
+### 3. Configure Backend Credentials
 
-### 3. Install Dependencies
+Edit `.env.docker.secret`:
+
+```env
+LMS_API_KEY=2e5a479aaf7a0502b9a645ae8aba39fd3d2f74dfb5dedf59f9415ccc25f158bc
+```
+
+### 4. Install Dependencies
 
 ```bash
-uv add openai python-dotenv
+uv add requests python-dotenv
 ```
 
 ## Usage
@@ -260,175 +236,60 @@ uv add openai python-dotenv
 Run the agent with a question:
 
 ```bash
-uv run agent.py "How do I resolve merge conflicts?"
+uv run agent.py "How many items are in the database?"
 ```
 
 ### Output Format
 
-The agent outputs valid JSON to stdout:
-
 ```json
 {
-  "answer": "To resolve merge conflicts, follow these steps:\n1. Identify the conflicting files...\n2. Open the files and locate conflict markers...\n3. Edit the files to resolve conflicts...\n4. Stage the resolved files...\n5. Complete the merge...",
-  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+  "answer": "There are 120 items in the database.",
+  "source": "",
   "tool_calls": [
     {
-      "tool": "read_file",
+      "tool": "query_api",
       "args": {
-        "path": "wiki/git-workflow.md"
+        "method": "GET",
+        "path": "/items/"
       },
       "result": {
         "success": true,
-        "content": "# Git workflow for tasks\n\n## Resolving Merge Conflicts\n\nWhen Git cannot automatically merge changes..."
+        "status_code": 200,
+        "data": {"count": 120, "items": [...]}
       }
     }
   ]
 }
 ```
 
-### Output Fields
+## Lessons Learned from Benchmark
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `answer` | string | The final answer from the LLM |
-| `source` | string | Wiki section reference (e.g., `wiki/git-workflow.md#section`) |
-| `tool_calls` | array | Array of all tool calls made during execution |
+### Challenge 1: Rate Limiting
 
-### Tool Call Object
+Free LLM models have strict rate limits. Solution:
+- Implemented exponential backoff retry logic (5s, 10s, 20s, 40s delays)
+- Reduced MAX_TOOL_CALLS from 20 to 10 to minimize API calls
+- Optimized system prompt to encourage direct tool usage
 
-Each tool call in the `tool_calls` array contains:
+### Challenge 2: Tool Selection
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `tool` | string | Name of the tool used (`read_file` or `list_files`) |
-| `args` | object | Arguments passed to the tool |
-| `result` | object | Result returned by the tool execution |
+LLM sometimes chose wrong tool. Solution:
+- Made system prompt more explicit about when to use each tool
+- Added examples in prompt (e.g., "wiki/git-workflow.md")
+- Specified that "how many" questions should use `query_api`
 
-## Examples
+### Challenge 3: Authentication
 
-### Example 1: Question about Merge Conflicts
+Initially forgot to pass LMS_API_KEY. Solution:
+- Added `lms_api_key` to config loaded from `.env.docker.secret`
+- Pass config to `query_api` function
+- Use Bearer token authentication in HTTP headers
 
-**Input:**
-```bash
-uv run agent.py "How do I resolve merge conflicts in Git?"
-```
+### Challenge 4: Null Content Handling
 
-**Expected behavior:**
-- LLM calls `read_file` with path `wiki/git-workflow.md`
-- LLM reads the merge conflict resolution section
-- LLM provides answer with source citation
-
-**Expected output:**
-```json
-{
-  "answer": "To resolve merge conflicts...",
-  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
-  "tool_calls": [
-    {
-      "tool": "read_file",
-      "args": {"path": "wiki/git-workflow.md"},
-      "result": {"success": true, "content": "..."}
-    }
-  ]
-}
-```
-
-### Example 2: Exploring Wiki Structure
-
-**Input:**
-```bash
-uv run agent.py "What files are in the wiki directory?"
-```
-
-**Expected behavior:**
-- LLM calls `list_files` with path `wiki`
-- LLM receives list of files and directories
-- LLM summarizes the wiki structure
-
-**Expected output:**
-```json
-{
-  "answer": "The wiki directory contains the following files: git.md, git-workflow.md, docker.md, api.md, and several others...",
-  "source": "",
-  "tool_calls": [
-    {
-      "tool": "list_files",
-      "args": {"path": "wiki"},
-      "result": {
-        "success": true,
-        "files": [
-          {"name": "git.md", "type": "file"},
-          {"name": "git-workflow.md", "type": "file"}
-        ]
-      }
-    }
-  ]
-}
-```
-
-### Example 3: Multi-step Tool Usage
-
-**Input:**
-```bash
-uv run agent.py "What Docker commands are available and how do I use them?"
-```
-
-**Expected behavior:**
-1. LLM calls `list_files` to find Docker-related files
-2. LLM calls `read_file` on `wiki/docker.md`
-3. LLM may call `read_file` on `wiki/docker-compose.md`
-4. LLM synthesizes answer from multiple sources
-
-**Expected output:**
-```json
-{
-  "answer": "Docker commands include: docker build, docker run, docker ps, docker stop...\nFor multi-container setups, use docker-compose...",
-  "source": "wiki/docker.md",
-  "tool_calls": [
-    {"tool": "list_files", "args": {"path": "wiki"}, "result": {...}},
-    {"tool": "read_file", "args": {"path": "wiki/docker.md"}, "result": {...}},
-    {"tool": "read_file", "args": {"path": "wiki/docker-compose.md"}, "result": {...}}
-  ]
-}
-```
-
-## Error Handling
-
-### Invalid Path (Directory Traversal)
-
-```json
-{
-  "tool": "read_file",
-  "args": {"path": "../secret.txt"},
-  "result": {
-    "success": false,
-    "error": "Invalid path: directory traversal not allowed. Path: ../secret.txt"
-  }
-}
-```
-
-### File Not Found
-
-```json
-{
-  "tool": "read_file",
-  "args": {"path": "wiki/nonexistent.md"},
-  "result": {
-    "success": false,
-    "error": "File not found: wiki/nonexistent.md"
-  }
-}
-```
-
-### Max Tool Calls Reached
-
-```json
-{
-  "answer": "I reached the maximum number of tool calls. Here's what I found so far...",
-  "source": "",
-  "tool_calls": [...]
-}
-```
+LLM returns `content: null` when making tool calls. Solution:
+- Changed `msg.get("content", "")` to `(msg.get("content") or "")`
+- This handles the case where content is present but null
 
 ## Testing
 
@@ -440,21 +301,20 @@ uv run pytest tests/test_agent.py -v
 
 ### Test Coverage
 
-The test suite includes:
-
 1. **Regression Tests:**
-   - Test merge conflicts question → expects `read_file` in tool_calls
-   - Test wiki files question → expects `list_files` in tool_calls
+   - Merge conflicts question → expects `read_file`
+   - Wiki files question → expects `list_files`
+   - Items count question → expects `query_api`
 
 2. **Unit Tests:**
-   - Test tool execution functions
-   - Test path validation
-   - Test agentic loop with mocked LLM
+   - Tool execution functions
+   - Path validation (directory traversal prevention)
+   - Configuration loading
 
 3. **Integration Tests:**
-   - Test full agent execution
-   - Test JSON output structure
-   - Test error handling
+   - Full agent execution
+   - JSON output structure
+   - Error handling
 
 ## File Structure
 
@@ -462,23 +322,54 @@ The test suite includes:
 se-toolkit-lab-6/
 ├── agent.py              # Main agent script with tools
 ├── AGENT.md              # This documentation
-├── .env.agent.example    # Example environment file
-├── .env.agent.secret     # Actual credentials (gitignored)
+├── .env.agent.secret     # LLM credentials (gitignored)
+├── .env.docker.secret    # Backend credentials (gitignored)
 ├── plans/
-│   └── task-2.md         # Implementation plan
+│   └── task-3.md         # Implementation plan
 └── tests/
     └── test_agent.py     # Pytest tests
 ```
 
-## Comparison with Task 1
+## API Endpoints Reference
 
-| Feature | Task 1 | Task 2 |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/items/` | List all items |
+| GET | `/items/{id}/` | Get specific item |
+| POST | `/items/` | Create new item |
+| PUT | `/items/{id}/` | Update item |
+| DELETE | `/items/{id}/` | Delete item |
+| GET | `/analytics/scores` | Get analytics scores |
+| GET | `/analytics/scores?lab=lab-04` | Get scores for specific lab |
+| GET | `/analytics/completion-rate` | Get completion rate |
+| GET | `/interactions/` | List interactions |
+| GET | `/learners/` | List learners |
+
+## Error Handling
+
+### HTTP Errors
+
+| Status Code | Handling |
+|-------------|----------|
+| 200-299 | Success - return parsed data |
+| 400 | Bad Request - return error message |
+| 401 | Unauthorized - check LMS_API_KEY |
+| 404 | Not Found - endpoint doesn't exist |
+| 429 | Rate Limit - retry with backoff |
+| 500 | Server Error - backend issue |
+
+### Connection Errors
+
+- **Timeout:** Request timed out after 180 seconds
+- **Connection Error:** Backend not running at configured URL
+- **Invalid JSON:** Malformed request body
+
+## Comparison with Task 2
+
+| Feature | Task 2 | Task 3 |
 |---------|--------|--------|
-| Tool calling | ❌ No | ✅ Yes |
-| Agentic loop | ❌ No | ✅ Yes |
-| File reading | ❌ No | ✅ `read_file` |
-| Directory listing | ❌ No | ✅ `list_files` |
-| Source citation | ❌ No | ✅ `source` field |
-| Max tool calls | N/A | 10 per question |
-| System prompt | ❌ No | ✅ Yes |
-| Path security | N/A | ✅ Directory traversal prevention |
+| Tools | `read_file`, `list_files` | + `query_api` |
+| Source | Wiki only | Wiki + Backend API |
+| Authentication | None | LMS_API_KEY for query_api |
+| Data questions | ❌ No | ✅ Yes |
+| Environment config | LLM only | LLM + Backend |
