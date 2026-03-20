@@ -562,12 +562,13 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     is_etl_question = any(kw in q_lower for kw in etl_keywords_en + etl_keywords_ru)
 
     # Detect analytics bug questions - read analytics.py and look for specific bugs
-    # Include: crashes, top-learners, endpoint, sorting with None, risky operations
+    # Include: crashes, top-learners, sorting with None, risky operations
+    # Note: 'endpoint' alone is too generic - require 'analytics' + 'endpoint' or 'crash'
     analytics_bug_keywords_en = ['analytics.py', 'risky', 'sorting', 'none', 'division', 'bug', 'vulnerability', 
-                                  'crashes', 'crash', 'top-learners', 'top learners', 'endpoint',
+                                  'crashes', 'crash', 'top-learners', 'top learners',
                                   'risky operations', 'none-unsafe', 'unsafe']
     analytics_bug_keywords_ru = ['маршрутизатора аналитики', 'рискованные', 'сортировка', 'баг', 'уязвимость',
-                                  'крашится', 'краш', 'топ учащихся', 'endpoint',
+                                  'крашится', 'краш', 'топ учащихся',
                                   'рискованные операции', 'небезопасные']
     is_analytics_bug_question = any(kw in q_lower for kw in analytics_bug_keywords_en + analytics_bug_keywords_ru)
     
@@ -579,20 +580,51 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     # Detect code reading questions - bugs, source code, specific files
     # English keywords
     code_keywords_en = [
-        'read the code', 'source code', 'analytics.py', 'docker-compose', 
-        'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 
+        'read the code', 'source code', 'analytics.py', 'bug', 'vulnerability', 'risky',
         'division', 'none', 'etl', 'api handles', 'sorting'
     ]
     # Russian keywords
     code_keywords_ru = [
-        'прочитайте', 'исходный код', 'маршрутизатора', 'пайплайн', 'docker-compose', 'dockerfile'
+        'прочитайте', 'исходный код', 'маршрутизатора', 'пайплайн'
     ]
     is_code_question = any(kw in q_lower for kw in code_keywords_en + code_keywords_ru)
+    
+    # Detect Docker/infrastructure questions - read docker-compose, Dockerfile, Caddyfile
+    docker_keywords_en = ['docker-compose', 'dockerfile', 'caddyfile', 'trace', 'request path', 'infrastructure']
+    docker_keywords_ru = ['путь запроса', 'инфраструктура']
+    is_docker_question = any(kw in q_lower for kw in docker_keywords_en + docker_keywords_ru)
     
     # Build enhanced question with explicit tool hints
     enhanced_question = question
     
-    if is_mismatch_question:
+    if is_docker_question:
+        # Docker/infrastructure question - read multiple files to trace request path
+        enhanced_question = f"""[DOCKER/INFRASTRUCTURE QUESTION - USE read_file]
+CRITICAL: This question asks about Docker infrastructure and request flow.
+You MUST use read_file to read multiple configuration files.
+
+REQUIRED STEPS:
+1. Use read_file to read docker-compose.yml
+   - Look for: service definitions, ports, networks, volumes
+   
+2. Use read_file to read Dockerfile
+   - Look for: base image, COPY, RUN, EXPOSE, CMD
+   
+3. Use read_file to read Caddyfile (if mentioned)
+   - Look for: reverse_proxy, routes, ports
+   
+4. Use read_file to read backend/main.py
+   - Look for: app entry point, port configuration
+
+5. Trace the request path:
+   - External request → Caddy (port 42002) → Backend (port 42001/8000)
+   - Describe how the request flows through each component
+
+ANSWER: Explain the request path through the infrastructure
+
+Original question: {question}"""
+
+    elif is_mismatch_question:
         # MULTI-STEP: query_api first, then read_file to compare models
         enhanced_question = f"""[FIELD MISMATCH QUESTION - START WITH query_api]
 CRITICAL: This question requires TWO steps in order:
