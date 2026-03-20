@@ -549,24 +549,45 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     analytics_keywords_ru = ['completion-rate', 'лаборатории', 'лаб-', 'аналитики']
     is_analytics_question = any(kw in q_lower for kw in analytics_keywords_en + analytics_keywords_ru)
     
+    # Detect field mismatch / model comparison questions - MULTI-STEP
+    # These require: 1) query_api to get error, 2) read_file to compare models
+    mismatch_keywords_en = ['mismatch', 'field', 'schema', 'model', 'interactionmodel', 'interactionlog', 'compare']
+    mismatch_keywords_ru = ['несоответствие', 'поле', 'модель', 'сравните', 'взаимодействие']
+    is_mismatch_question = any(kw in q_lower for kw in mismatch_keywords_en + mismatch_keywords_ru)
+    
     # Detect code reading questions - bugs, source code, specific files
     # English keywords
     code_keywords_en = [
         'read the code', 'source code', 'analytics.py', 'docker-compose', 
         'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 
-        'division', 'none', 'compare', 'etl', 'api handles', 'field mismatch',
-        'model', 'schema', 'interaction'
+        'division', 'none', 'etl', 'api handles', 'sorting'
     ]
     # Russian keywords
     code_keywords_ru = [
-        'прочитайте', 'исходный код', 'маршрутизатора', 'несоответствие', 'поле',
-        'модель', 'сравните', 'пайплайн', 'docker-compose', 'dockerfile'
+        'прочитайте', 'исходный код', 'маршрутизатора', 'пайплайн', 'docker-compose', 'dockerfile'
     ]
     is_code_question = any(kw in q_lower for kw in code_keywords_en + code_keywords_ru)
     
     # Build enhanced question with explicit tool hints
     enhanced_question = question
-    if is_data_question and not is_code_question and not is_analytics_question:
+    
+    if is_mismatch_question:
+        # MULTI-STEP: query_api first, then read_file to compare models
+        enhanced_question = f"""[FIELD MISMATCH QUESTION - MULTI-STEP]
+CRITICAL: This question requires TWO steps:
+
+STEP 1 - Query the API:
+1. Call query_api with method="GET" and path="/interactions/" or the endpoint mentioned
+2. Read the error message carefully - it will tell you about field mismatch
+
+STEP 2 - Compare models in source code:
+3. Use read_file to check the model definitions (backend/analytics.py or backend/main.py)
+4. Compare InteractionModel (response schema) with InteractionLog (database model)
+5. Look for field name differences (e.g., 'user_id' vs 'learner_id')
+
+Original question: {question}"""
+    
+    elif is_data_question and not is_code_question and not is_analytics_question:
         # Pure data count question - use query_api
         enhanced_question = f"""[DATA COUNT QUESTION - USE query_api]
 CRITICAL: This question asks about the NUMBER/COUNT of items or learners in the database.
@@ -580,6 +601,7 @@ Steps:
 DO NOT use read_file - the data is in the API, not in files!
 
 Original question: {question}"""
+    
     elif is_analytics_question and not is_code_question:
         # Analytics endpoint question - use query_api
         enhanced_question = f"""[ANALYTICS API QUESTION - USE query_api]
@@ -593,6 +615,7 @@ Steps:
 4. Use read_file to check that specific file for the problematic line (look for sorting, division, None)
 
 Original question: {question}"""
+    
     elif is_code_question:
         # Code analysis question - use read_file
         enhanced_question = f"""[CODE ANALYSIS QUESTION - USE read_file]
@@ -604,10 +627,6 @@ For bugs in analytics: read_file backend/analytics.py
   - Look for None comparisons: "is None", "== None"
   - Look for missing null checks before operations
   - Look for sorting with None values: sorted() with None
-
-For model/schema mismatch: read_file backend/analytics.py or backend/main.py
-  - Compare model fields with database schema
-  - Look for field name differences
 
 For Docker/infrastructure: read_file docker-compose.yml, Dockerfile, Caddyfile
 For API flow: read_file backend/main.py
