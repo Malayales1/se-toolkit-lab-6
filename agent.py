@@ -532,13 +532,14 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     data_keywords_en = [
         'how many', 'count', 'number of', 'items in', 'learners', 'sent data', 
         'unique', 'stored', 'currently', 'database', 'items are', 'elements',
-        'interactions', 'top-learners', 'endpoint crashes', 'sorting'
+        'interactions', 'top-learners', 'endpoint crashes', 'sorting',
+        'distinct', 'submitted data', 'submitted', 'submitted data'
     ]
     # Russian keywords (for autochecker questions)
     data_keywords_ru = [
         'сколько', 'элементов', 'учащихся', 'данных', 'уникальных', 'хранится',
         'в базе', 'запросите', 'подсчитайте', 'результаты', 'взаимодействий',
-        'топ учащихся', 'крашится', 'сортировка'
+        'топ учащихся', 'крашится', 'сортировка', 'различных', 'отправили'
     ]
     is_data_question = any(kw in q_lower for kw in data_keywords_en + data_keywords_ru)
     
@@ -561,11 +562,13 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     is_etl_question = any(kw in q_lower for kw in etl_keywords_en + etl_keywords_ru)
 
     # Detect analytics bug questions - read analytics.py and look for specific bugs
-    # Include: crashes, top-learners, endpoint, sorting with None
+    # Include: crashes, top-learners, endpoint, sorting with None, risky operations
     analytics_bug_keywords_en = ['analytics.py', 'risky', 'sorting', 'none', 'division', 'bug', 'vulnerability', 
-                                  'crashes', 'crash', 'top-learners', 'top learners', 'endpoint']
+                                  'crashes', 'crash', 'top-learners', 'top learners', 'endpoint',
+                                  'risky operations', 'none-unsafe', 'unsafe']
     analytics_bug_keywords_ru = ['маршрутизатора аналитики', 'рискованные', 'сортировка', 'баг', 'уязвимость',
-                                  'крашится', 'краш', 'топ учащихся', 'endpoint']
+                                  'крашится', 'краш', 'топ учащихся', 'endpoint',
+                                  'рискованные операции', 'небезопасные']
     is_analytics_bug_question = any(kw in q_lower for kw in analytics_bug_keywords_en + analytics_bug_keywords_ru)
     
     # Detect HTTP status code questions - query API or read docs
@@ -647,19 +650,22 @@ STEP 2 - Find the bug in source code:
 
 Original question: {question}"""
         else:
-            enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION]
+            # Pure analytics bug question - just read_file and look for bugs
+            enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION - USE read_file]
 CRITICAL: This question asks about bugs/risky operations in analytics.py.
 
-Steps:
+REQUIRED STEPS:
 1. Use read_file to read backend/analytics.py
 
-2. Look for these specific bugs:
+2. Look for these specific risky operations:
    - Division operations: x / y without checking if y is zero
    - Sorting with None: sorted(list) where list contains None values
    - None comparisons: if x == None instead of if x is None
    - Missing null checks before operations
-   
-3. Report the risky operations you find
+
+3. Report ALL risky operations you find
+
+DO NOT use query_api for this question - the bug is in the source code!
 
 Original question: {question}"""
     
