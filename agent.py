@@ -583,75 +583,29 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     
     if is_docker_question:
         # Docker/infrastructure question - read multiple files to trace request path
-        enhanced_question = f"""[DOCKER/INFRASTRUCTURE QUESTION - USE read_file]
-CRITICAL: This question asks about Docker infrastructure and request flow.
-You MUST use read_file to read multiple configuration files.
-
-REQUIRED STEPS:
-1. Use read_file to read docker-compose.yml
-   - Look for: service definitions, ports, networks, volumes
-   
-2. Use read_file to read Dockerfile
-   - Look for: base image, COPY, RUN, EXPOSE, CMD
-   
-3. Use read_file to read Caddyfile (if mentioned)
-   - Look for: reverse_proxy, routes, ports
-   
-4. Use read_file to read backend/main.py
-   - Look for: app entry point, port configuration
-
-5. Trace the request path:
-   - External request → Caddy (port 42002) → Backend (port 42001/8000)
-   - Describe how the request flows through each component
-
-ANSWER: Explain the request path through the infrastructure
+        enhanced_question = f"""[DOCKER - USE read_file for MULTIPLE files]
+FIRST: read_file docker-compose.yml
+THEN: read_file Dockerfile
+THEN: read_file Caddyfile (if exists)
+THEN: Trace request: External → Caddy → Backend
 
 Original question: {question}"""
 
     elif is_mismatch_question:
         # MULTI-STEP: query_api first, then read_file to compare models
-        enhanced_question = f"""[FIELD MISMATCH QUESTION - START WITH query_api]
-CRITICAL: This question requires TWO steps in order:
-
-STEP 1 - QUERY THE API FIRST:
-1. Call query_api with method="GET" and path="/interactions/"
-2. Read the error message carefully - it will tell you about field mismatch
-3. The error will mention which fields don't match
-
-STEP 2 - COMPARE MODELS IN SOURCE CODE:
-4. Use read_file to check the model definitions:
-   - backend/analytics.py OR backend/main.py
-5. Compare these two models:
-   - InteractionModel (response schema) - what API returns
-   - InteractionLog (database model) - what's stored in DB
-6. Look for field name differences:
-   - Example: 'user_id' in one model vs 'learner_id' in another
-   - Example: 'timestamp' vs 'created_at'
-
-ANSWER: Report the field name mismatch you find
+        enhanced_question = f"""[FIELD MISMATCH - START WITH query_api]
+FIRST: query_api GET /interactions/
+THEN: Read error about field mismatch
+THEN: read_file backend/analytics.py (compare InteractionModel vs InteractionLog)
 
 Original question: {question}"""
     
     elif is_etl_question:
         # ETL vs API comparison - read both files and compare
-        enhanced_question = f"""[ETL VS API COMPARISON QUESTION - USE read_file]
-CRITICAL: This question asks you to compare ETL pipeline with API error handling.
-
-REQUIRED STEPS:
-1. Use read_file to read the ETL code:
-   - Path: etl.py OR backend/etl.py
-   - Look for: try/except blocks, error handling, retry logic
-   
-2. Use read_file to read the API router code:
-   - Path: backend/routers/*.py OR backend/main.py
-   - Look for: exception handlers, error responses
-
-3. Compare the two approaches:
-   - Does ETL retry on failure? Does API retry?
-   - Does ETL log errors? Does API log errors?
-   - What happens to failed data in each case?
-
-ANSWER: Describe the difference in error handling strategies
+        enhanced_question = f"""[ETL VS API - USE read_file for BOTH]
+FIRST: read_file etl.py (or backend/etl.py)
+THEN: read_file backend/routers/*.py (or backend/main.py)
+THEN: Compare error handling (try/except, retry, logging)
 
 Original question: {question}"""
     
@@ -659,44 +613,19 @@ Original question: {question}"""
         # Analytics bug detection - read analytics.py and look for specific bugs
         # For crash questions: MUST query_api FIRST to see the error, then read_file
         if 'crash' in q_lower or 'crashes' in q_lower or 'top-learners' in q_lower or 'top learners' in q_lower:
-            enhanced_question = f"""[ANALYTICS CRASH BUG QUESTION - START WITH query_api]
-CRITICAL: You MUST start by querying the API to reproduce the crash.
-
-STEP 1 - QUERY THE API FIRST (REQUIRED):
-1. Call query_api with method="GET" and path="/analytics/top-learners?lab=lab-99"
-2. Read the error message - it will show you what went wrong
-3. The error mentions which file has the bug (analytics.py)
-
-STEP 2 - FIND THE BUG IN SOURCE CODE:
-4. Use read_file to read backend/analytics.py
-5. Look for the sorting bug:
-   - sorted() called on a list that may contain None values
-   - When some learners have no scores, the sort fails
-   - Look for: sorted(learners, key=...) without None check
-
-ANSWER: Report which operation causes the crash (sorting with None values)
+            enhanced_question = f"""[ANALYTICS CRASH BUG - START WITH query_api]
+FIRST: Call query_api GET /analytics/top-learners?lab=lab-99
+THEN: Read the error
+THEN: read_file backend/analytics.py for sorting bug
 
 Original question: {question}"""
         else:
             # Pure analytics bug question - just read_file and look for bugs
             # This handles questions like "Which risky operations in analytics.py?"
-            enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION - USE read_file]
-CRITICAL: This question asks about bugs/risky operations in analytics.py.
-You MUST use read_file to read the source code.
-
-REQUIRED STEPS:
-1. Use read_file to read backend/analytics.py
-
-2. Look for these specific risky operations:
-   - Division operations: x / y without checking if y is zero
-   - Sorting with None: sorted(list) where list may contain None values
-   - None comparisons: if x == None instead of if x is None
-   - Missing null checks before operations
-
-3. Report ALL risky operations you find
-
-DO NOT use query_api for this question - the bug is in the source code!
-DO NOT guess - you must read the file!
+            enhanced_question = f"""[ANALYTICS BUG - USE read_file ONLY]
+FIRST: read_file backend/analytics.py
+THEN: Find risky operations (sorted with None, division, None checks)
+DO NOT use query_api - answer is in SOURCE CODE!
 
 Original question: {question}"""
     
@@ -715,53 +644,27 @@ Original question: {question}"""
     
     elif is_data_question and not is_code_question and not is_analytics_question:
         # Pure data count question - use query_api
-        enhanced_question = f"""[DATA COUNT QUESTION - START WITH query_api]
-CRITICAL: This question asks about the NUMBER/COUNT of items or learners in the database.
-You MUST start by using the query_api tool to get the data.
-
-REQUIRED STEPS:
-1. Call query_api with method="GET" and path="/items/" for items count
-   OR path="/learners/" for learners count
-   OR path="/interactions/" for interactions count
-2. Wait for the API response - you will get an array []
-3. Count the length of the returned array: len(array)
-4. Answer with the exact number (e.g., "There are 5 items")
-
-DO NOT use read_file - the data is ONLY in the API, not in files!
-DO NOT guess - you must query the API first!
+        enhanced_question = f"""[DATA COUNT - USE query_api]
+FIRST: query_api GET /items/ (or /learners/ or /interactions/)
+THEN: Count len(array) from response
+THEN: Answer with number
 
 Original question: {question}"""
     
     elif is_analytics_question and not is_code_question:
         # Analytics endpoint question - use query_api
-        enhanced_question = f"""[ANALYTICS API QUESTION - USE query_api]
-CRITICAL: This question asks about analytics data (completion-rate, scores, top-learners).
-You MUST use the query_api tool to query the analytics endpoint.
-
-Steps:
-1. Call query_api with method="GET" and path="/analytics/completion-rate?lab=lab-XX" or "/analytics/top-learners?lab=lab-XX"
-2. If you get an error, read the error message carefully
-3. The error will tell you which file has the bug (e.g., analytics.py)
-4. Use read_file to check that specific file for the problematic line (look for sorting, division, None)
+        enhanced_question = f"""[ANALYTICS - USE query_api]
+FIRST: query_api GET /analytics/completion-rate?lab=lab-XX (or /analytics/top-learners)
+THEN: Read response or error
+THEN: If error, read_file the mentioned source file
 
 Original question: {question}"""
     
     elif is_code_question:
         # Code analysis question - use read_file
-        enhanced_question = f"""[CODE ANALYSIS QUESTION - USE read_file]
-This question asks about source code, bugs, or infrastructure configuration.
-You MUST use read_file tool to read the relevant files.
-
-For bugs in analytics: read_file backend/analytics.py
-  - Look for division operations: /
-  - Look for None comparisons: "is None", "== None"
-  - Look for missing null checks before operations
-  - Look for sorting with None values: sorted() with None
-
-For Docker/infrastructure: read_file docker-compose.yml, Dockerfile, Caddyfile
-For API flow: read_file backend/main.py
-
-For ETL vs API comparison: read_file both backend code and ETL pipeline files
+        enhanced_question = f"""[CODE - USE read_file]
+FIRST: read_file the mentioned source file
+THEN: Find the answer in the content
 
 Original question: {question}"""
     
