@@ -618,22 +618,24 @@ Original question: {question}"""
     
     elif is_etl_question:
         # ETL vs API comparison - read both files and compare
-        enhanced_question = f"""[ETL VS API COMPARISON QUESTION]
+        enhanced_question = f"""[ETL VS API COMPARISON QUESTION - USE read_file]
 CRITICAL: This question asks you to compare ETL pipeline with API error handling.
 
-Steps:
-1. Use read_file to read the ETL code: etl.py or backend/etl.py
-   - Look for try/except blocks
-   - Look for how failures are handled (retry, log, skip?)
+REQUIRED STEPS:
+1. Use read_file to read the ETL code:
+   - Path: etl.py OR backend/etl.py
+   - Look for: try/except blocks, error handling, retry logic
    
-2. Use read_file to read the API router code: backend/routers/*.py or backend/main.py
-   - Look for exception handlers
-   - Look for error response patterns
-   
+2. Use read_file to read the API router code:
+   - Path: backend/routers/*.py OR backend/main.py
+   - Look for: exception handlers, error responses
+
 3. Compare the two approaches:
-   - Does ETL retry? Does API retry?
+   - Does ETL retry on failure? Does API retry?
    - Does ETL log errors? Does API log errors?
-   - What happens to failed data?
+   - What happens to failed data in each case?
+
+ANSWER: Describe the difference in error handling strategies
 
 Original question: {question}"""
     
@@ -661,21 +663,24 @@ ANSWER: Report which operation causes the crash (sorting with None values)
 Original question: {question}"""
         else:
             # Pure analytics bug question - just read_file and look for bugs
+            # This handles questions like "Which risky operations in analytics.py?"
             enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION - USE read_file]
 CRITICAL: This question asks about bugs/risky operations in analytics.py.
+You MUST use read_file to read the source code.
 
 REQUIRED STEPS:
 1. Use read_file to read backend/analytics.py
 
 2. Look for these specific risky operations:
    - Division operations: x / y without checking if y is zero
-   - Sorting with None: sorted(list) where list contains None values
+   - Sorting with None: sorted(list) where list may contain None values
    - None comparisons: if x == None instead of if x is None
    - Missing null checks before operations
-   
+
 3. Report ALL risky operations you find
 
 DO NOT use query_api for this question - the bug is in the source code!
+DO NOT guess - you must read the file!
 
 Original question: {question}"""
     
