@@ -528,24 +528,41 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     q_lower = question.lower()
     
     # Detect data count questions - force query_api usage
-    # Keywords: how many, count, number of, items, learners, unique, stored, currently
-    data_keywords = [
+    # English keywords
+    data_keywords_en = [
         'how many', 'count', 'number of', 'items in', 'learners', 'sent data', 
-        'unique', 'stored', 'currently', 'database', 'items are', 'elements'
+        'unique', 'stored', 'currently', 'database', 'items are', 'elements',
+        'interactions', 'top-learners', 'endpoint crashes', 'sorting'
     ]
-    is_data_question = any(kw in q_lower for kw in data_keywords)
+    # Russian keywords (for autochecker questions)
+    data_keywords_ru = [
+        'сколько', 'элементов', 'учащихся', 'данных', 'уникальных', 'хранится',
+        'в базе', 'запросите', 'подсчитайте', 'результаты', 'взаимодействий',
+        'топ учащихся', 'крашится', 'сортировка'
+    ]
+    is_data_question = any(kw in q_lower for kw in data_keywords_en + data_keywords_ru)
     
     # Detect analytics questions - completion-rate, analytics endpoints
-    analytics_keywords = ['completion-rate', 'completion rate', 'analytics', '/analytics', 'lab-']
-    is_analytics_question = any(kw in q_lower for kw in analytics_keywords)
+    # English keywords
+    analytics_keywords_en = ['completion-rate', 'completion rate', 'analytics', '/analytics', 'lab-']
+    # Russian keywords
+    analytics_keywords_ru = ['completion-rate', 'лаборатории', 'лаб-', 'аналитики']
+    is_analytics_question = any(kw in q_lower for kw in analytics_keywords_en + analytics_keywords_ru)
     
     # Detect code reading questions - bugs, source code, specific files
-    code_keywords = [
+    # English keywords
+    code_keywords_en = [
         'read the code', 'source code', 'analytics.py', 'docker-compose', 
         'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 
-        'division', 'none', 'compare', 'etl', 'api handles'
+        'division', 'none', 'compare', 'etl', 'api handles', 'field mismatch',
+        'model', 'schema', 'interaction'
     ]
-    is_code_question = any(kw in q_lower for kw in code_keywords)
+    # Russian keywords
+    code_keywords_ru = [
+        'прочитайте', 'исходный код', 'маршрутизатора', 'несоответствие', 'поле',
+        'модель', 'сравните', 'пайплайн', 'docker-compose', 'dockerfile'
+    ]
+    is_code_question = any(kw in q_lower for kw in code_keywords_en + code_keywords_ru)
     
     # Build enhanced question with explicit tool hints
     enhanced_question = question
@@ -556,7 +573,7 @@ CRITICAL: This question asks about the NUMBER/COUNT of items or learners in the 
 You MUST use the query_api tool to get the data.
 
 Steps:
-1. Call query_api with method="GET" and path="/items/" OR path="/learners/"
+1. Call query_api with method="GET" and path="/items/" OR path="/learners/" OR path="/interactions/"
 2. Count the length of the returned array
 3. Answer with the exact number
 
@@ -566,14 +583,14 @@ Original question: {question}"""
     elif is_analytics_question and not is_code_question:
         # Analytics endpoint question - use query_api
         enhanced_question = f"""[ANALYTICS API QUESTION - USE query_api]
-CRITICAL: This question asks about analytics data (completion-rate, scores).
+CRITICAL: This question asks about analytics data (completion-rate, scores, top-learners).
 You MUST use the query_api tool to query the analytics endpoint.
 
 Steps:
-1. Call query_api with method="GET" and path="/analytics/completion-rate?lab=lab-XX"
+1. Call query_api with method="GET" and path="/analytics/completion-rate?lab=lab-XX" or "/analytics/top-learners?lab=lab-XX"
 2. If you get an error, read the error message carefully
 3. The error will tell you which file has the bug (e.g., analytics.py)
-4. Use read_file to check that specific file for the problematic line
+4. Use read_file to check that specific file for the problematic line (look for sorting, division, None)
 
 Original question: {question}"""
     elif is_code_question:
@@ -586,6 +603,11 @@ For bugs in analytics: read_file backend/analytics.py
   - Look for division operations: /
   - Look for None comparisons: "is None", "== None"
   - Look for missing null checks before operations
+  - Look for sorting with None values: sorted() with None
+
+For model/schema mismatch: read_file backend/analytics.py or backend/main.py
+  - Compare model fields with database schema
+  - Look for field name differences
 
 For Docker/infrastructure: read_file docker-compose.yml, Dockerfile, Caddyfile
 For API flow: read_file backend/main.py
