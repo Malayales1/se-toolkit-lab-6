@@ -524,10 +524,54 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     Returns:
         dict with 'answer', 'source', and 'tool_calls' fields
     """
-    # Initialize message history with system prompt and user question
+    # Pre-process question to detect data queries and add explicit hints
+    q_lower = question.lower()
+    
+    # Detect data count questions - force query_api usage
+    data_keywords = ['how many', 'count', 'number of', 'items in', 'learners', 'sent data', 'unique']
+    is_data_question = any(kw in q_lower for kw in data_keywords)
+    
+    # Detect analytics questions
+    analytics_keywords = ['completion-rate', 'completion rate', 'analytics', '/analytics']
+    is_analytics_question = any(kw in q_lower for kw in analytics_keywords)
+    
+    # Detect code reading questions
+    code_keywords = ['read the code', 'source code', 'analytics.py', 'docker-compose', 'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 'division', 'none']
+    is_code_question = any(kw in q_lower for kw in code_keywords)
+    
+    # Build enhanced question with explicit tool hints
+    enhanced_question = question
+    if is_data_question:
+        enhanced_question = f"""[DATA QUERY QUESTION]
+This question asks about COUNT/NUMBER of items/learners.
+REQUIRED: Use query_api tool with GET method.
+- For items: GET /items/
+- For learners: GET /learners/
+Then count the array length and return the number.
+
+Original question: {question}"""
+    elif is_analytics_question:
+        enhanced_question = f"""[ANALYTICS API QUESTION]
+This question asks about analytics/completion-rate.
+REQUIRED: Use query_api tool with GET method.
+- Endpoint: /analytics/completion-rate?lab=lab-XX
+- Include lab parameter in the URL
+
+Original question: {question}"""
+    elif is_code_question:
+        enhanced_question = f"""[CODE ANALYSIS QUESTION]
+This question asks about source code bugs or infrastructure.
+REQUIRED: Use read_file tool to read specific files.
+- For bugs: backend/analytics.py
+- For docker: docker-compose.yml, Dockerfile, Caddyfile
+- For API: backend/main.py
+
+Original question: {question}"""
+    
+    # Initialize message history with system prompt and enhanced question
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question}
+        {"role": "user", "content": enhanced_question}
     ]
 
     # Track all tool calls for output
