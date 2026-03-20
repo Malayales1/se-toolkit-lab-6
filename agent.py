@@ -551,18 +551,21 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     
     # Detect field mismatch / model comparison questions - MULTI-STEP
     # These require: 1) query_api to get error, 2) read_file to compare models
-    mismatch_keywords_en = ['mismatch', 'field', 'schema', 'model', 'interactionmodel', 'interactionlog', 'compare']
-    mismatch_keywords_ru = ['несоответствие', 'поле', 'модель', 'сравните', 'взаимодействие']
+    mismatch_keywords_en = ['mismatch', 'field', 'schema', 'model', 'interactionmodel', 'interactionlog', 'compare', 'interactions']
+    mismatch_keywords_ru = ['несоответствие', 'поле', 'модель', 'сравните', 'взаимодействие', 'взаимодействий']
     is_mismatch_question = any(kw in q_lower for kw in mismatch_keywords_en + mismatch_keywords_ru)
-    
+
     # Detect ETL vs API comparison questions - read both files and compare
     etl_keywords_en = ['etl', 'pipeline', 'failure', 'error handling', 'strategy', 'compare how']
     etl_keywords_ru = ['etl', 'пайплайн', 'обработка ошибок', 'сравните как', 'стратегия']
     is_etl_question = any(kw in q_lower for kw in etl_keywords_en + etl_keywords_ru)
-    
+
     # Detect analytics bug questions - read analytics.py and look for specific bugs
-    analytics_bug_keywords_en = ['analytics.py', 'risky', 'sorting', 'none', 'division', 'bug', 'vulnerability']
-    analytics_bug_keywords_ru = ['маршрутизатора аналитики', 'рискованные', 'сортировка', 'баг', 'уязвимость']
+    # Include: crashes, top-learners, endpoint, sorting with None
+    analytics_bug_keywords_en = ['analytics.py', 'risky', 'sorting', 'none', 'division', 'bug', 'vulnerability', 
+                                  'crashes', 'crash', 'top-learners', 'top learners', 'endpoint']
+    analytics_bug_keywords_ru = ['маршрутизатора аналитики', 'рискованные', 'сортировка', 'баг', 'уязвимость',
+                                  'крашится', 'краш', 'топ учащихся', 'endpoint']
     is_analytics_bug_question = any(kw in q_lower for kw in analytics_bug_keywords_en + analytics_bug_keywords_ru)
     
     # Detect HTTP status code questions - query API or read docs
@@ -625,7 +628,26 @@ Original question: {question}"""
     
     elif is_analytics_bug_question:
         # Analytics bug detection - read analytics.py and look for specific bugs
-        enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION]
+        # For crash questions: first query_api to get error, then read_file
+        if 'crash' in q_lower or 'crashes' in q_lower or 'top-learners' in q_lower or 'top learners' in q_lower:
+            enhanced_question = f"""[ANALYTICS CRASH BUG QUESTION - MULTI-STEP]
+CRITICAL: This question asks about an endpoint that crashes.
+
+STEP 1 - Query the API to reproduce the crash:
+1. Call query_api with method="GET" and path="/analytics/top-learners?lab=lab-XX"
+   - Try different lab values if needed (lab-99, lab-01, etc.)
+2. Read the error message carefully
+
+STEP 2 - Find the bug in source code:
+3. Use read_file to read backend/analytics.py
+4. Look for the specific bug:
+   - Sorting with None values: sorted(list) where list contains None
+   - This causes crashes when some learners have no scores (None)
+   - Look for sorted() calls without None handling
+
+Original question: {question}"""
+        else:
+            enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION]
 CRITICAL: This question asks about bugs/risky operations in analytics.py.
 
 Steps:
