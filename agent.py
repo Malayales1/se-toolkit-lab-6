@@ -528,43 +528,69 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     q_lower = question.lower()
     
     # Detect data count questions - force query_api usage
-    data_keywords = ['how many', 'count', 'number of', 'items in', 'learners', 'sent data', 'unique']
+    # Keywords: how many, count, number of, items, learners, unique, stored, currently
+    data_keywords = [
+        'how many', 'count', 'number of', 'items in', 'learners', 'sent data', 
+        'unique', 'stored', 'currently', 'database', 'items are', 'elements'
+    ]
     is_data_question = any(kw in q_lower for kw in data_keywords)
     
-    # Detect analytics questions
-    analytics_keywords = ['completion-rate', 'completion rate', 'analytics', '/analytics']
+    # Detect analytics questions - completion-rate, analytics endpoints
+    analytics_keywords = ['completion-rate', 'completion rate', 'analytics', '/analytics', 'lab-']
     is_analytics_question = any(kw in q_lower for kw in analytics_keywords)
     
-    # Detect code reading questions
-    code_keywords = ['read the code', 'source code', 'analytics.py', 'docker-compose', 'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 'division', 'none']
+    # Detect code reading questions - bugs, source code, specific files
+    code_keywords = [
+        'read the code', 'source code', 'analytics.py', 'docker-compose', 
+        'dockerfile', 'caddyfile', 'main.py', 'bug', 'vulnerability', 'risky', 
+        'division', 'none', 'compare', 'etl', 'api handles'
+    ]
     is_code_question = any(kw in q_lower for kw in code_keywords)
     
     # Build enhanced question with explicit tool hints
     enhanced_question = question
-    if is_data_question:
-        enhanced_question = f"""[DATA QUERY QUESTION]
-This question asks about COUNT/NUMBER of items/learners.
-REQUIRED: Use query_api tool with GET method.
-- For items: GET /items/
-- For learners: GET /learners/
-Then count the array length and return the number.
+    if is_data_question and not is_code_question and not is_analytics_question:
+        # Pure data count question - use query_api
+        enhanced_question = f"""[DATA COUNT QUESTION - USE query_api]
+CRITICAL: This question asks about the NUMBER/COUNT of items or learners in the database.
+You MUST use the query_api tool to get the data.
+
+Steps:
+1. Call query_api with method="GET" and path="/items/" OR path="/learners/"
+2. Count the length of the returned array
+3. Answer with the exact number
+
+DO NOT use read_file - the data is in the API, not in files!
 
 Original question: {question}"""
-    elif is_analytics_question:
-        enhanced_question = f"""[ANALYTICS API QUESTION]
-This question asks about analytics/completion-rate.
-REQUIRED: Use query_api tool with GET method.
-- Endpoint: /analytics/completion-rate?lab=lab-XX
-- Include lab parameter in the URL
+    elif is_analytics_question and not is_code_question:
+        # Analytics endpoint question - use query_api
+        enhanced_question = f"""[ANALYTICS API QUESTION - USE query_api]
+CRITICAL: This question asks about analytics data (completion-rate, scores).
+You MUST use the query_api tool to query the analytics endpoint.
+
+Steps:
+1. Call query_api with method="GET" and path="/analytics/completion-rate?lab=lab-XX"
+2. If you get an error, read the error message carefully
+3. The error will tell you which file has the bug (e.g., analytics.py)
+4. Use read_file to check that specific file for the problematic line
 
 Original question: {question}"""
     elif is_code_question:
-        enhanced_question = f"""[CODE ANALYSIS QUESTION]
-This question asks about source code bugs or infrastructure.
-REQUIRED: Use read_file tool to read specific files.
-- For bugs: backend/analytics.py
-- For docker: docker-compose.yml, Dockerfile, Caddyfile
-- For API: backend/main.py
+        # Code analysis question - use read_file
+        enhanced_question = f"""[CODE ANALYSIS QUESTION - USE read_file]
+This question asks about source code, bugs, or infrastructure configuration.
+You MUST use read_file tool to read the relevant files.
+
+For bugs in analytics: read_file backend/analytics.py
+  - Look for division operations: /
+  - Look for None comparisons: "is None", "== None"
+  - Look for missing null checks before operations
+
+For Docker/infrastructure: read_file docker-compose.yml, Dockerfile, Caddyfile
+For API flow: read_file backend/main.py
+
+For ETL vs API comparison: read_file both backend code and ETL pipeline files
 
 Original question: {question}"""
     
