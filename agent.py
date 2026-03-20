@@ -594,17 +594,25 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     
     if is_mismatch_question:
         # MULTI-STEP: query_api first, then read_file to compare models
-        enhanced_question = f"""[FIELD MISMATCH QUESTION - MULTI-STEP]
-CRITICAL: This question requires TWO steps:
+        enhanced_question = f"""[FIELD MISMATCH QUESTION - START WITH query_api]
+CRITICAL: This question requires TWO steps in order:
 
-STEP 1 - Query the API:
-1. Call query_api with method="GET" and path="/interactions/" or the endpoint mentioned
+STEP 1 - QUERY THE API FIRST:
+1. Call query_api with method="GET" and path="/interactions/"
 2. Read the error message carefully - it will tell you about field mismatch
+3. The error will mention which fields don't match
 
-STEP 2 - Compare models in source code:
-3. Use read_file to check the model definitions (backend/analytics.py or backend/main.py)
-4. Compare InteractionModel (response schema) with InteractionLog (database model)
-5. Look for field name differences (e.g., 'user_id' vs 'learner_id')
+STEP 2 - COMPARE MODELS IN SOURCE CODE:
+4. Use read_file to check the model definitions:
+   - backend/analytics.py OR backend/main.py
+5. Compare these two models:
+   - InteractionModel (response schema) - what API returns
+   - InteractionLog (database model) - what's stored in DB
+6. Look for field name differences:
+   - Example: 'user_id' in one model vs 'learner_id' in another
+   - Example: 'timestamp' vs 'created_at'
+
+ANSWER: Report the field name mismatch you find
 
 Original question: {question}"""
     
@@ -631,22 +639,24 @@ Original question: {question}"""
     
     elif is_analytics_bug_question:
         # Analytics bug detection - read analytics.py and look for specific bugs
-        # For crash questions: first query_api to get error, then read_file
+        # For crash questions: MUST query_api FIRST to see the error, then read_file
         if 'crash' in q_lower or 'crashes' in q_lower or 'top-learners' in q_lower or 'top learners' in q_lower:
-            enhanced_question = f"""[ANALYTICS CRASH BUG QUESTION - MULTI-STEP]
-CRITICAL: This question asks about an endpoint that crashes.
+            enhanced_question = f"""[ANALYTICS CRASH BUG QUESTION - START WITH query_api]
+CRITICAL: You MUST start by querying the API to reproduce the crash.
 
-STEP 1 - Query the API to reproduce the crash:
-1. Call query_api with method="GET" and path="/analytics/top-learners?lab=lab-XX"
-   - Try different lab values if needed (lab-99, lab-01, etc.)
-2. Read the error message carefully
+STEP 1 - QUERY THE API FIRST (REQUIRED):
+1. Call query_api with method="GET" and path="/analytics/top-learners?lab=lab-99"
+2. Read the error message - it will show you what went wrong
+3. The error mentions which file has the bug (analytics.py)
 
-STEP 2 - Find the bug in source code:
-3. Use read_file to read backend/analytics.py
-4. Look for the specific bug:
-   - Sorting with None values: sorted(list) where list contains None
-   - This causes crashes when some learners have no scores (None)
-   - Look for sorted() calls without None handling
+STEP 2 - FIND THE BUG IN SOURCE CODE:
+4. Use read_file to read backend/analytics.py
+5. Look for the sorting bug:
+   - sorted() called on a list that may contain None values
+   - When some learners have no scores, the sort fails
+   - Look for: sorted(learners, key=...) without None check
+
+ANSWER: Report which operation causes the crash (sorting with None values)
 
 Original question: {question}"""
         else:
@@ -662,7 +672,7 @@ REQUIRED STEPS:
    - Sorting with None: sorted(list) where list contains None values
    - None comparisons: if x == None instead of if x is None
    - Missing null checks before operations
-
+   
 3. Report ALL risky operations you find
 
 DO NOT use query_api for this question - the bug is in the source code!
@@ -684,16 +694,20 @@ Original question: {question}"""
     
     elif is_data_question and not is_code_question and not is_analytics_question:
         # Pure data count question - use query_api
-        enhanced_question = f"""[DATA COUNT QUESTION - USE query_api]
+        enhanced_question = f"""[DATA COUNT QUESTION - START WITH query_api]
 CRITICAL: This question asks about the NUMBER/COUNT of items or learners in the database.
-You MUST use the query_api tool to get the data.
+You MUST start by using the query_api tool to get the data.
 
-Steps:
-1. Call query_api with method="GET" and path="/items/" OR path="/learners/" OR path="/interactions/"
-2. Count the length of the returned array
-3. Answer with the exact number
+REQUIRED STEPS:
+1. Call query_api with method="GET" and path="/items/" for items count
+   OR path="/learners/" for learners count
+   OR path="/interactions/" for interactions count
+2. Wait for the API response - you will get an array []
+3. Count the length of the returned array: len(array)
+4. Answer with the exact number (e.g., "There are 5 items")
 
-DO NOT use read_file - the data is in the API, not in files!
+DO NOT use read_file - the data is ONLY in the API, not in files!
+DO NOT guess - you must query the API first!
 
 Original question: {question}"""
     
