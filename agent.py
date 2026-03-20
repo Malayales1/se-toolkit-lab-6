@@ -429,44 +429,28 @@ You have access to three tools:
 - list_files: List files and directories at a given path (e.g., wiki, backend)
 - query_api: Call the deployed backend API to get system data (items, analytics, scores, learners, interactions)
 
-*** CRITICAL RULES ***
+*** CRITICAL RULES - FOLLOW EXACTLY ***
 
-**RULE 1: For ANY question about COUNT, HOW MANY, NUMBER OF items/learners/scores — ALWAYS use query_api FIRST**
-- "How many items?" → query_api GET /items/ → count the array length
-- "How many learners?" → query_api GET /learners/ → count the array length
-- "How many sent data?" → query_api GET /learners/ → count results
-- NEVER use read_file for counting data — data is in the API, not in files!
+**RULE 1: For COUNT/HOW MANY questions → USE query_api**
+- "How many items?", "How many learners?", "How many distinct..."
+- Action: query_api GET /items/ or /learners/ → count array length → answer with number
 
-**RULE 2: For ANY question about API endpoints, analytics, completion-rate — use query_api**
-- "completion-rate for lab-99" → query_api GET /analytics/completion-rate?lab=lab-99
-- If API returns error → read the error message → use read_file to check the source code mentioned
+**RULE 2: For FIELD MISMATCH questions → START WITH query_api, THEN read_file**
+- "interactions endpoint", "field mismatch", "schema", "model"
+- Action: query_api GET /interactions/ → read error → read_file backend/analytics.py → compare InteractionModel vs InteractionLog
 
-**RULE 3: For CODE/DEBUG questions — use read_file for specific files**
-- "bugs in analytics" → read_file backend/analytics.py
-- "division operations" → read_file backend/analytics.py → search for "/"
-- "None comparison" → read_file backend/analytics.py → search for "None"
-- "docker-compose" → read_file docker-compose.yml
-- "Dockerfile" → read_file Dockerfile
-- "Caddyfile" → read_file caddy/Caddyfile or Caddyfile
-- "main.py" → read_file backend/main.py
+**RULE 3: For ANALYTICS BUG questions → USE read_file for analytics.py**
+- "analytics.py", "risky operations", "sorting with None", "Which operations are risky?"
+- Action: read_file backend/analytics.py → look for: sorted() with None, division without zero check, None comparisons
+- DO NOT use query_api for "risky operations" questions - the answer is in the SOURCE CODE!
 
-**RULE 4: For DOCUMENTATION questions — use read_file for wiki**
-- "wiki says..." → read_file wiki/<topic>.md
-- "how to..." → read_file wiki/<topic>.md
+**RULE 4: For ETL VS API questions → USE read_file for BOTH files**
+- "Compare ETL", "pipeline handles failures", "vs how the API"
+- Action: read_file etl.py → read_file backend/routers/*.py → compare error handling strategies
 
-*** EXAMPLES ***
-
-Q: "How many items are in the database?"
-A: Use query_api GET /items/ → count results → answer with number
-
-Q: "How many learners sent data?"
-A: Use query_api GET /learners/ → count array length → answer with number
-
-Q: "What bugs in analytics.py?"
-A: Use read_file backend/analytics.py → look for division (/), None, missing checks
-
-Q: "Trace request path through docker"
-A: Use read_file docker-compose.yml → read_file Dockerfile → read_file Caddyfile → read_file backend/main.py
+**RULE 5: For DOCKER questions → USE read_file for MULTIPLE files**
+- "docker-compose", "Dockerfile", "Caddyfile", "trace request path"
+- Action: read_file docker-compose.yml → read_file Dockerfile → read_file Caddyfile → trace request flow
 
 *** END CRITICAL RULES ***
 
