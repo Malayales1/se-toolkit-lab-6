@@ -555,6 +555,21 @@ def call_llm_with_tools(question: str, config: dict[str, str]) -> dict[str, Any]
     mismatch_keywords_ru = ['несоответствие', 'поле', 'модель', 'сравните', 'взаимодействие']
     is_mismatch_question = any(kw in q_lower for kw in mismatch_keywords_en + mismatch_keywords_ru)
     
+    # Detect ETL vs API comparison questions - read both files and compare
+    etl_keywords_en = ['etl', 'pipeline', 'failure', 'error handling', 'strategy', 'compare how']
+    etl_keywords_ru = ['etl', 'пайплайн', 'обработка ошибок', 'сравните как', 'стратегия']
+    is_etl_question = any(kw in q_lower for kw in etl_keywords_en + etl_keywords_ru)
+    
+    # Detect analytics bug questions - read analytics.py and look for specific bugs
+    analytics_bug_keywords_en = ['analytics.py', 'risky', 'sorting', 'none', 'division', 'bug', 'vulnerability']
+    analytics_bug_keywords_ru = ['маршрутизатора аналитики', 'рискованные', 'сортировка', 'баг', 'уязвимость']
+    is_analytics_bug_question = any(kw in q_lower for kw in analytics_bug_keywords_en + analytics_bug_keywords_ru)
+    
+    # Detect HTTP status code questions - query API or read docs
+    status_keywords_en = ['status code', 'http', 'return', 'response code', '200', '404', '500']
+    status_keywords_ru = ['статус код', 'возвращает', 'ответ', '200', '404', '500']
+    is_status_question = any(kw in q_lower for kw in status_keywords_en + status_keywords_ru)
+    
     # Detect code reading questions - bugs, source code, specific files
     # English keywords
     code_keywords_en = [
@@ -584,6 +599,58 @@ STEP 2 - Compare models in source code:
 3. Use read_file to check the model definitions (backend/analytics.py or backend/main.py)
 4. Compare InteractionModel (response schema) with InteractionLog (database model)
 5. Look for field name differences (e.g., 'user_id' vs 'learner_id')
+
+Original question: {question}"""
+    
+    elif is_etl_question:
+        # ETL vs API comparison - read both files and compare
+        enhanced_question = f"""[ETL VS API COMPARISON QUESTION]
+CRITICAL: This question asks you to compare ETL pipeline with API error handling.
+
+Steps:
+1. Use read_file to read the ETL code: etl.py or backend/etl.py
+   - Look for try/except blocks
+   - Look for how failures are handled (retry, log, skip?)
+   
+2. Use read_file to read the API router code: backend/routers/*.py or backend/main.py
+   - Look for exception handlers
+   - Look for error response patterns
+   
+3. Compare the two approaches:
+   - Does ETL retry? Does API retry?
+   - Does ETL log errors? Does API log errors?
+   - What happens to failed data?
+
+Original question: {question}"""
+    
+    elif is_analytics_bug_question:
+        # Analytics bug detection - read analytics.py and look for specific bugs
+        enhanced_question = f"""[ANALYTICS BUG DETECTION QUESTION]
+CRITICAL: This question asks about bugs/risky operations in analytics.py.
+
+Steps:
+1. Use read_file to read backend/analytics.py
+
+2. Look for these specific bugs:
+   - Division operations: x / y without checking if y is zero
+   - Sorting with None: sorted(list) where list contains None values
+   - None comparisons: if x == None instead of if x is None
+   - Missing null checks before operations
+   
+3. Report the risky operations you find
+
+Original question: {question}"""
+    
+    elif is_status_question:
+        # HTTP status code question - query API or read docs
+        enhanced_question = f"""[HTTP STATUS CODE QUESTION]
+This question asks about HTTP status codes.
+
+Steps:
+1. Try query_api with method="GET" and the endpoint path mentioned
+2. Read the status_code from the response
+3. If you get an error, read the error message for the status code
+4. Alternatively, use read_file to check wiki/api.md or backend code
 
 Original question: {question}"""
     
