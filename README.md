@@ -80,7 +80,111 @@ In simple words, you should be able to say:
 1. [Call an LLM from code](./lab/tasks/required/task-1.md#call-an-llm-from-code)
 2. [The documentation agent](./lab/tasks/required/task-2.md#the-documentation-agent)
 3. [The system agent](./lab/tasks/required/task-3.md#the-system-agent)
+4. [Containerize and document](./lab/tasks/required/task-4.md#containerize-and-document)
 
 ### Optional (recommended)
 
 1. [Advanced agent features](./lab/tasks/optional/task-1.md#advanced-agent-features)
+
+## Deploy
+
+This section describes how to deploy the agent and backend using Docker.
+
+### Prerequisites
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/your-username/se-toolkit-lab-6.git
+   cd se-toolkit-lab-6
+   ```
+
+2. **Create environment files:**
+
+   **LLM credentials** (`.env.agent.secret`):
+   ```bash
+   cp .env.agent.example .env.agent.secret
+   ```
+
+   Edit `.env.agent.secret`:
+   ```env
+   LLM_API_KEY=sk-or-v1-...  # Get from https://openrouter.ai/keys
+   LLM_API_BASE=https://openrouter.ai/api/v1
+   LLM_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+   ```
+
+   **Backend credentials** (`.env.docker.secret`):
+   ```bash
+   cp .env.docker.example .env.docker.secret
+   ```
+
+   Edit `.env.docker.secret`:
+   ```env
+   LMS_API_KEY=your-lms-api-key
+   # ... other backend variables
+   ```
+
+### Build and Run
+
+Build and start all services (backend, postgres, caddy, and bot):
+
+```bash
+docker compose --env-file .env.docker.secret up --build -d
+```
+
+Check the status of all containers:
+
+```bash
+docker compose --env-file .env.docker.secret ps
+```
+
+You should see:
+- `app` - Backend FastAPI service
+- `postgres` - PostgreSQL database
+- `pgadmin` - Database admin UI
+- `caddy` - Frontend web server
+- `bot` - System agent (runs once and exits)
+
+### Run the Bot
+
+The bot is a CLI tool, so run it on-demand:
+
+```bash
+# Run a question through the containerized bot
+docker compose --env-file .env.docker.secret run --rm bot python agent.py "How many items are in the database?"
+```
+
+### Health Checks
+
+**Check backend health:**
+```bash
+curl -sf http://localhost:42002/docs
+```
+
+**Check bot logs:**
+```bash
+docker compose --env-file .env.docker.secret logs bot --tail 20
+```
+
+**Check all containers:**
+```bash
+docker compose --env-file .env.docker.secret ps
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Bot container exits immediately | Bot is a CLI tool - it runs once and exits. Use `docker compose run` to execute questions. |
+| LLM API errors | Check `LLM_API_KEY` and `LLM_API_BASE` in `.env.agent.secret` |
+| Backend connection errors | Ensure `AGENT_API_BASE_URL=http://app:8000` in docker-compose.yml |
+| Port conflicts | Change host ports in `.env.docker.secret` (e.g., `APP_HOST_PORT`) |
+
+### Stop and Cleanup
+
+```bash
+# Stop all services
+docker compose --env-file .env.docker.secret down
+
+# Stop and remove volumes (database data will be lost)
+docker compose --env-file .env.docker.secret down -v
+```

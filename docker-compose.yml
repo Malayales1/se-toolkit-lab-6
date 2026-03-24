@@ -84,6 +84,23 @@ services:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile
 
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    restart: unless-stopped
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY:?'LLM_API_KEY is required'}
+      - LLM_API_BASE=${LLM_API_BASE:?'LLM_API_BASE is required'}
+      - LLM_MODEL=${LLM_MODEL:?'LLM_MODEL is required'}
+      - LMS_API_KEY=${LMS_API_KEY:?'LMS_API_KEY is required'}
+      - AGENT_API_BASE_URL=http://app:${APP_CONTAINER_PORT}
+    depends_on:
+      - app
+    # Bot runs as CLI, not a long-running service
+    # It will be invoked on-demand via docker compose run
+    command: ["python", "agent.py", "Bot containerized and running alongside backend"]
+
   # Uncomment to enable Grafana for the optional task.
   # grafana:
   #   # image: grafana/grafana:latest
